@@ -77,6 +77,8 @@ func NewDeej(logger *zap.SugaredLogger, verbose bool) (*Deej, error) {
 
 	d.sessions = sessions
 
+	newExtraUtils(d)
+
 	logger.Debug("Created deej instance")
 
 	return d, nil
