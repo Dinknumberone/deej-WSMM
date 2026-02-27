@@ -124,6 +124,8 @@ func (sio *SerialIO) Start() error {
 		}
 	}()
 
+	//periodically send the active application name and volume level if it has changed, and pc statistics
+
 	return nil
 }
 
@@ -232,7 +234,10 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	// but most lines will end with CRLF. it may also have garbage instead of
 	// deej-formatted values, so we must check for that! just ignore bad ones
 	if !expectedLinePattern.MatchString(line) {
+		logger.Debug("string not matched with value of", line, "  and expected to be", expectedLinePattern.String())
+
 		return
+
 	}
 
 	// trim the suffix

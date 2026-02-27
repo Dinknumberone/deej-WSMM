@@ -23,14 +23,7 @@ func currentWindowUpdater(d *Deej) {
 
 	var lastSession string
 
-	
-
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("Recovered from panic: %v", r)
-			}
-    	}()
 
 		for {
 			time.Sleep(200 * time.Millisecond)
