@@ -1,0 +1,16 @@
+XCommand system to recieve discinct information from MCU
+X  - pots: recieve current fader values
+  - destination: recieved when mFader reaches target position (to prevent changing audio of program when switching applications while fader is still moving)
+  - buttons: recieve button value for specified button
+  - mute: reviece mute value and what channel it is on
+
+config option to set what buttons activate what key or application
+  special button options:
+  - switch audio output (takes 2 options for audio devices)
+  - hebwook call
+  - 
+
+
+active app/mFader:
+
+  - lock volume changes when application switches until reached destination command is recieved

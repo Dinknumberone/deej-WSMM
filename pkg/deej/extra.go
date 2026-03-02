@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lxn/win"
 	"github.com/omriharel/deej/pkg/deej/util"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/thoas/go-funk"
@@ -22,14 +23,23 @@ func newExtraUtils(d *Deej) {
 func currentWindowUpdater(d *Deej) {
 
 	var lastSession string
+	var lastwindow win.HWND
 
 	go func() {
 
 		for {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 
 			var err error
 
+			//cheap current window check just to see if the active window has changed
+			currentWindow := win.GetForegroundWindow()
+			if currentWindow == lastwindow {
+				continue
+			}
+			lastwindow = currentWindow
+
+			//only if window has changed, get full current proccess info
 			rawCurrentWindowProcessNames, err := util.GetCurrentWindowProcessNames()
 			if err != nil {
 				continue
@@ -45,8 +55,6 @@ func currentWindowUpdater(d *Deej) {
 
 			currentWindowProcessName = strings.ToLower(currentWindowProcessName)
 
-			//d.logger.Debug(currentWindowProcessNames[0])
-
 			if currentWindowProcessName == lastSession {
 				continue
 			}
@@ -56,11 +64,7 @@ func currentWindowUpdater(d *Deej) {
 				d.sessions.refreshSessions(true)
 			}
 
-			//d.logger.Debug(currentWindowProcessName)
-
 			sessions, ok := d.sessions.get(currentWindowProcessName)
-
-			//d.logger.Debug(d.sessions.m)
 
 			if !ok {
 				continue

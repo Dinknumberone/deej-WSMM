@@ -119,7 +119,7 @@ func (sio *SerialIO) Start() error {
 			case <-sio.stopChannel:
 				sio.close(namedLogger)
 			case line := <-lineChannel:
-				sio.handleLine(namedLogger, line)
+				sio.handleCommand(namedLogger, line)
 			}
 		}
 	}()
@@ -146,6 +146,30 @@ func (sio *SerialIO) SubscribeToSliderMoveEvents() chan SliderMoveEvent {
 	sio.sliderMoveConsumers = append(sio.sliderMoveConsumers, ch)
 
 	return ch
+}
+
+func (sio *SerialIO) handleCommand(logger *zap.SugaredLogger, line string) {
+	splitLine := strings.Split(line, ":")
+
+	if len(splitLine) != 2 {
+		logger.Error("Invalid Line of length: " + strconv.Itoa(len(splitLine)) + ", expected 2")
+		return
+	}
+
+	command := splitLine[0]
+	line = splitLine[1]
+
+	switch command {
+	case "F": //fader command
+		sio.handleLine(logger, line)
+	case "B": //button command
+	case "D": //destination command, sent when arrived at target after moving
+	case "M": //mute command
+	default:
+		logger.Error("unknown command recieved")
+		return
+	}
+
 }
 
 func (sio *SerialIO) setupOnConfigReload() {
