@@ -51,6 +51,8 @@ func currentWindowUpdater(d *Deej) {
 				continue
 			}
 
+			d.sessions.lockCurrentTargetKeys(currentWindowProcessNames)
+
 			currentWindowProcessName := currentWindowProcessNames[0]
 
 			currentWindowProcessName = strings.ToLower(currentWindowProcessName)

@@ -23,6 +23,7 @@ type sessionMap struct {
 
 	lastSessionRefresh time.Time
 	unmappedSessions   []Session
+	lockedCurrentKeys  map[string]struct{}
 }
 
 const (
@@ -61,11 +62,12 @@ func newSessionMap(deej *Deej, logger *zap.SugaredLogger, sessionFinder SessionF
 	logger = logger.Named("sessions")
 
 	m := &sessionMap{
-		deej:          deej,
-		logger:        logger,
-		m:             make(map[string][]Session),
-		lock:          &sync.Mutex{},
-		sessionFinder: sessionFinder,
+		deej:              deej,
+		logger:            logger,
+		m:                 make(map[string][]Session),
+		lockedCurrentKeys: make(map[string]struct{}),
+		lock:              &sync.Mutex{},
+		sessionFinder:     sessionFinder,
 	}
 
 	logger.Debug("Created session map instance")
@@ -227,6 +229,8 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 
 	// for each possible target for this slider...
 	for _, target := range targets {
+		resolvedTargetIsCurrent := m.targetHasSpecialTransform(strings.ToLower(target)) &&
+			strings.TrimPrefix(strings.ToLower(target), specialTargetTransformPrefix) == specialTargetCurrentWindow
 
 		// resolve the target name by cleaning it up and applying any special transformations.
 		// depending on the transformation applied, this can result in more than one target name
@@ -234,6 +238,9 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 
 		// for each resolved target...
 		for _, resolvedTarget := range resolvedTargets {
+			if resolvedTargetIsCurrent && m.currentTargetKeyLocked(resolvedTarget) {
+				continue
+			}
 
 			// check the map for matching sessions
 			sessions, ok := m.get(resolvedTarget)
@@ -269,6 +276,30 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 		// (or another, more catastrophic failure happens)
 		m.refreshSessions(true)
 	}
+}
+
+func (m *sessionMap) lockCurrentTargetKeys(keys []string) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	for _, key := range keys {
+		m.lockedCurrentKeys[strings.ToLower(key)] = struct{}{}
+	}
+}
+
+func (m *sessionMap) unlockCurrentTargetKeys() {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.lockedCurrentKeys = make(map[string]struct{})
+}
+
+func (m *sessionMap) currentTargetKeyLocked(key string) bool {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	_, ok := m.lockedCurrentKeys[strings.ToLower(key)]
+	return ok
 }
 
 func (m *sessionMap) targetHasSpecialTransform(target string) bool {
