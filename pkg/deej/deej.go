@@ -142,6 +142,7 @@ func (d *Deej) run() {
 
 	// watch the config file for changes
 	go d.config.WatchConfigFileChanges()
+	d.startStatusFileUpdater()
 
 	// connect to the arduino for the first time
 	go func() {

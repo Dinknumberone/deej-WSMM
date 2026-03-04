@@ -1,6 +1,11 @@
 package deej
 
 import (
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/getlantern/systray"
 
 	"github.com/omriharel/deej/pkg/deej/icon"
@@ -22,6 +27,13 @@ func (d *Deej) initializeTray(onDone func()) {
 
 		refreshSessions := systray.AddMenuItem("Re-scan audio sessions", "Manually refresh audio sessions if something's stuck")
 		refreshSessions.SetIcon(icon.RefreshSessions)
+		openStatusWindow := systray.AddMenuItem("Open live status window", "Open a persistent auto-refreshing status console")
+
+		systray.AddSeparator()
+		currentTargetInfo := systray.AddMenuItem("Current app: (none)", "Resolved target for deej.current")
+		currentTargetInfo.Disable()
+		currentLocksInfo := systray.AddMenuItem("Locked slider(s): (none)", "Sliders temporarily locked while motorized slider moves")
+		currentLocksInfo.Disable()
 
 		if d.version != "" {
 			systray.AddSeparator()
@@ -63,7 +75,88 @@ func (d *Deej) initializeTray(onDone func()) {
 					// performance: the reason that forcing a refresh here is okay is that users can't spam the
 					// right-click -> select-this-option sequence at a rate that's meaningful to performance
 					d.sessions.refreshSessions(true)
+
+				// open live status console
+				case <-openStatusWindow.ClickedCh:
+					logger.Info("Open status window clicked")
+
+					statusFilePath, err := filepath.Abs(filepath.Join(logDirectory, statusFileName))
+					if err != nil {
+						logger.Warnw("Failed to resolve status file path", "error", err)
+						break
+					}
+
+					script := "$p='" + strings.ReplaceAll(statusFilePath, "'", "''") + "'; " +
+						"$last=''; " +
+						"$rows=8; " +
+						"while ($true) { " +
+						"if (Test-Path $p) { $content = [System.IO.File]::ReadAllText($p) } else { $content = 'Waiting for status file...'; }; " +
+						"if ($content -ne $last) { " +
+						"$last = $content; " +
+						"$width = [Math]::Max([Console]::WindowWidth - 1, 1); " +
+						"$lines = $content -split \"`r?`n\"; " +
+						"[Console]::SetCursorPosition(0, 0); " +
+						"for ($i = 0; $i -lt $rows; $i++) { " +
+						"if ($i -lt $lines.Count) { " +
+						"$line = $lines[$i]; " +
+						"if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }; " +
+						"Write-Host ($line.PadRight($width)); " +
+						"} else { " +
+						"Write-Host (''.PadRight($width)); " +
+						"} " +
+						"} " +
+						"}; " +
+						"Start-Sleep -Milliseconds 100 " +
+						"}"
+
+					if err := util.OpenExternalArgs(
+						logger,
+						"powershell.exe",
+						"-NoExit",
+						"-ExecutionPolicy",
+						"Bypass",
+						"-Command",
+						script,
+					); err != nil {
+						logger.Warnw("Failed to open status window", "error", err)
+					}
 				}
+			}
+		}()
+
+		go func() {
+			ticker := time.NewTicker(250 * time.Millisecond)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				currentTarget := d.sessions.currentTargetStatus()
+				if currentTarget == "" {
+					currentTarget = "(none)"
+				}
+
+				lockedSliderIDs := d.sessions.currentLockedSliderIDs()
+				lockedSummary := "(none)"
+				if len(lockedSliderIDs) > 0 {
+					idStrings := make([]string, len(lockedSliderIDs))
+					for idx, sliderID := range lockedSliderIDs {
+						idStrings[idx] = strconv.Itoa(sliderID)
+					}
+
+					lockedSummary = strings.Join(idStrings, ", ")
+				}
+
+				currentTargetTitle := "Current app: " + currentTarget
+				if len(currentTargetTitle) > 80 {
+					currentTargetTitle = currentTargetTitle[:76] + "..."
+				}
+				currentTargetInfo.SetTitle(currentTargetTitle)
+
+				currentLocksTitle := "Locked slider(s): " + lockedSummary
+				if len(currentLocksTitle) > 80 {
+					currentLocksTitle = currentLocksTitle[:76] + "..."
+				}
+
+				currentLocksInfo.SetTitle(currentLocksTitle)
 			}
 		}()
 

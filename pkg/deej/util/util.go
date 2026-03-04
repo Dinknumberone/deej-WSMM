@@ -75,6 +75,35 @@ func OpenExternal(logger *zap.SugaredLogger, cmd string, arg string) error {
 	return nil
 }
 
+// OpenExternalArgs spawns a detached window with the provided command and args.
+// On windows this uses "start" without /b to allow opening a dedicated console window.
+func OpenExternalArgs(logger *zap.SugaredLogger, cmd string, args ...string) error {
+	var execCommandArgs []string
+
+	if Linux() {
+		joined := cmd
+		for _, arg := range args {
+			joined += " " + arg
+		}
+		execCommandArgs = []string{"/bin/bash", "-c", joined}
+	} else {
+		execCommandArgs = append([]string{"cmd.exe", "/C", "start", "", cmd}, args...)
+	}
+
+	command := exec.Command(execCommandArgs[0], execCommandArgs[1:]...)
+
+	if err := command.Run(); err != nil {
+		logger.Warnw("Failed to spawn detached process with args",
+			"command", cmd,
+			"args", args,
+			"error", err)
+
+		return fmt.Errorf("spawn detached proc with args: %w", err)
+	}
+
+	return nil
+}
+
 // NormalizeScalar "trims" the given float32 to 2 points of precision (e.g. 0.15442 -> 0.15)
 // This is used both for windows core audio volume levels and for cleaning up slider level values from serial
 func NormalizeScalar(v float32) float32 {

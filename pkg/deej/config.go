@@ -26,6 +26,7 @@ type CanonicalConfig struct {
 	InvertSliders bool
 
 	NoiseReductionLevel string
+	CurrentBlacklist    []string
 
 	logger             *zap.SugaredLogger
 	notifier           Notifier
@@ -53,6 +54,7 @@ const (
 	configKeyCOMPort             = "com_port"
 	configKeyBaudRate            = "baud_rate"
 	configKeyNoiseReductionLevel = "noise_reduction"
+	configKeyCurrentBlacklist    = "current_blacklist"
 
 	defaultCOMPort  = "COM4"
 	defaultBaudRate = 9600
@@ -89,6 +91,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyInvertSliders, false)
 	userConfig.SetDefault(configKeyCOMPort, defaultCOMPort)
 	userConfig.SetDefault(configKeyBaudRate, defaultBaudRate)
+	userConfig.SetDefault(configKeyCurrentBlacklist, []string{})
 
 	internalConfig := viper.New()
 	internalConfig.SetConfigName(internalConfigName)
@@ -238,10 +241,32 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 
 	cc.InvertSliders = cc.userConfig.GetBool(configKeyInvertSliders)
 	cc.NoiseReductionLevel = cc.userConfig.GetString(configKeyNoiseReductionLevel)
+	cc.CurrentBlacklist = normalizeConfigProcessNameList(cc.userConfig.GetStringSlice(configKeyCurrentBlacklist))
 
 	cc.logger.Debug("Populated config fields from vipers")
 
 	return nil
+}
+
+func normalizeConfigProcessNameList(values []string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(values))
+
+	for _, value := range values {
+		normalized := strings.TrimSpace(strings.ToLower(value))
+		if normalized == "" {
+			continue
+		}
+
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+
+	return result
 }
 
 func (cc *CanonicalConfig) onConfigReloaded() {

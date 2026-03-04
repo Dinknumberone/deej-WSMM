@@ -3,6 +3,7 @@ package deej
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +24,9 @@ type sessionMap struct {
 
 	lastSessionRefresh time.Time
 	unmappedSessions   []Session
-	lockedCurrentKeys  map[string]struct{}
+	lockedCurrentSliders map[int]time.Time
+	lastCurrentTargets []string
+	currentTargetKey   string
 }
 
 const (
@@ -53,6 +56,7 @@ const (
 	// to manually refresh sessions). a cleaner way to do this down the line is by registering to notifications
 	// whenever a new session is added, but that's too hard to justify for how easy this solution is
 	maxTimeBetweenSessionRefreshes = time.Second * 45
+	currentSliderLockTimeout       = time.Second * 3
 )
 
 // this matches friendly device names (on Windows), e.g. "Headphones (Realtek Audio)"
@@ -62,12 +66,14 @@ func newSessionMap(deej *Deej, logger *zap.SugaredLogger, sessionFinder SessionF
 	logger = logger.Named("sessions")
 
 	m := &sessionMap{
-		deej:              deej,
-		logger:            logger,
-		m:                 make(map[string][]Session),
-		lockedCurrentKeys: make(map[string]struct{}),
-		lock:              &sync.Mutex{},
-		sessionFinder:     sessionFinder,
+		deej:               deej,
+		logger:             logger,
+		m:                  make(map[string][]Session),
+		lockedCurrentSliders: make(map[int]time.Time),
+		lastCurrentTargets: []string{},
+		currentTargetKey:   "",
+		lock:               &sync.Mutex{},
+		sessionFinder:      sessionFinder,
 	}
 
 	logger.Debug("Created session map instance")
@@ -234,11 +240,11 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 
 		// resolve the target name by cleaning it up and applying any special transformations.
 		// depending on the transformation applied, this can result in more than one target name
-		resolvedTargets := m.resolveTarget(target)
+		resolvedTargets := m.resolveTargetForSlider(target, event.SliderID, true)
 
 		// for each resolved target...
 		for _, resolvedTarget := range resolvedTargets {
-			if resolvedTargetIsCurrent && m.currentTargetKeyLocked(resolvedTarget) {
+			if resolvedTargetIsCurrent && m.currentSliderLocked(event.SliderID) {
 				continue
 			}
 
@@ -278,27 +284,29 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 	}
 }
 
-func (m *sessionMap) lockCurrentTargetKeys(keys []string) {
+func (m *sessionMap) lockCurrentSlider(sliderID int) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	for _, key := range keys {
-		m.lockedCurrentKeys[strings.ToLower(key)] = struct{}{}
-	}
+	m.logger.Debugw("current slider locked", "sliderID", sliderID)
+	m.lockedCurrentSliders[sliderID] = time.Now()
 }
 
-func (m *sessionMap) unlockCurrentTargetKeys() {
+func (m *sessionMap) unlockCurrentSliders() {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.lockedCurrentKeys = make(map[string]struct{})
+	m.logger.Debug("current slider locks cleared")
+
+	m.lockedCurrentSliders = make(map[int]time.Time)
 }
 
-func (m *sessionMap) currentTargetKeyLocked(key string) bool {
+func (m *sessionMap) currentSliderLocked(sliderID int) bool {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	_, ok := m.lockedCurrentKeys[strings.ToLower(key)]
+	m.cleanupExpiredCurrentSliderLocksLocked()
+	_, ok := m.lockedCurrentSliders[sliderID]
 	return ok
 }
 
@@ -319,6 +327,209 @@ func (m *sessionMap) resolveTarget(target string) []string {
 	return []string{target}
 }
 
+func (m *sessionMap) resolveTargetForSlider(target string, sliderID int, rememberCurrentFallback bool) []string {
+
+	// start by ignoring the case
+	target = strings.ToLower(target)
+
+	// look for any special targets first, by examining the prefix
+	if m.targetHasSpecialTransform(target) {
+		specialTargetName := strings.TrimPrefix(target, specialTargetTransformPrefix)
+		if specialTargetName == specialTargetCurrentWindow {
+			return m.resolveCurrentWindowTarget(sliderID, rememberCurrentFallback)
+		}
+
+		return m.applyTargetTransform(specialTargetName)
+	}
+
+	return []string{target}
+}
+
+func (m *sessionMap) resolveCurrentWindowTarget(sliderID int, rememberFallback bool) []string {
+	currentWindowProcessNames, err := util.GetCurrentWindowProcessNames()
+
+	// silently ignore errors here, as this is on deej's "hot path" (and it could just mean the user's running linux)
+	if err != nil {
+		return nil
+	}
+
+	// ensure names are lowercase and deduplicated
+	for targetIdx, target := range currentWindowProcessNames {
+		currentWindowProcessNames[targetIdx] = strings.ToLower(target)
+	}
+
+	currentWindowProcessNames = funk.UniqString(currentWindowProcessNames)
+	filteredTargets := m.filterCurrentWindowTargetsForSlider(sliderID, currentWindowProcessNames)
+
+	if len(filteredTargets) > 0 {
+		m.setCurrentTargetKey(filteredTargets[0])
+		if rememberFallback {
+			m.setLastCurrentTargets(filteredTargets)
+		}
+
+		return filteredTargets
+	}
+
+	fallbackTargets := m.getLastCurrentTargets()
+	fallbackTargets = m.filterCurrentWindowTargetsForSlider(sliderID, fallbackTargets)
+	if len(fallbackTargets) > 0 {
+		m.setCurrentTargetKey(fallbackTargets[0])
+		if rememberFallback {
+			m.setLastCurrentTargets(fallbackTargets)
+		}
+
+		return fallbackTargets
+	}
+
+	if rememberFallback {
+		m.setLastCurrentTargets(nil)
+	}
+	m.setCurrentTargetKey("")
+	return fallbackTargets
+}
+
+func (m *sessionMap) filterCurrentWindowTargetsForSlider(sliderID int, targets []string) []string {
+	filteredTargets := make([]string, 0, len(targets))
+
+	for _, target := range targets {
+		if target == "" {
+			continue
+		}
+
+		if m.isCurrentTargetBlacklisted(target) {
+			continue
+		}
+
+		if m.targetMappedToOtherSlider(sliderID, target) {
+			continue
+		}
+
+		if !m.targetHasAudioSession(target) {
+			continue
+		}
+
+		filteredTargets = append(filteredTargets, target)
+	}
+
+	return filteredTargets
+}
+
+func (m *sessionMap) isCurrentTargetBlacklisted(target string) bool {
+	for _, blacklistedTarget := range m.deej.config.CurrentBlacklist {
+		if target == blacklistedTarget {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m *sessionMap) targetMappedToOtherSlider(sliderID int, target string) bool {
+	mappedToOtherSlider := false
+
+	m.deej.config.SliderMapping.iterate(func(mappedSliderID int, mappedTargets []string) {
+		if mappedToOtherSlider || mappedSliderID == sliderID {
+			return
+		}
+
+		for _, mappedTarget := range mappedTargets {
+			mappedTarget = strings.ToLower(mappedTarget)
+
+			// don't compare against transforms when checking static ownership
+			if m.targetHasSpecialTransform(mappedTarget) {
+				continue
+			}
+
+			resolvedMappedTargets := m.resolveTarget(mappedTarget)
+			for _, resolvedMappedTarget := range resolvedMappedTargets {
+				if resolvedMappedTarget == target {
+					mappedToOtherSlider = true
+					return
+				}
+			}
+		}
+	})
+
+	return mappedToOtherSlider
+}
+
+func (m *sessionMap) targetHasAudioSession(target string) bool {
+	sessions, ok := m.get(target)
+	return ok && len(sessions) > 0
+}
+
+func (m *sessionMap) setLastCurrentTargets(targets []string) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.lastCurrentTargets = append([]string(nil), targets...)
+}
+
+func (m *sessionMap) getLastCurrentTargets() []string {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	return append([]string(nil), m.lastCurrentTargets...)
+}
+
+func (m *sessionMap) setCurrentTargetKey(target string) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.currentTargetKey = strings.ToLower(target)
+}
+
+func (m *sessionMap) currentTargetStatus() string {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	return m.currentTargetKey
+}
+
+func (m *sessionMap) currentLockedSliderIDs() []int {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.cleanupExpiredCurrentSliderLocksLocked()
+
+	sliderIDs := make([]int, 0, len(m.lockedCurrentSliders))
+	for sliderID := range m.lockedCurrentSliders {
+		sliderIDs = append(sliderIDs, sliderID)
+	}
+
+	sort.Ints(sliderIDs)
+	return sliderIDs
+}
+
+func (m *sessionMap) cleanupExpiredCurrentSliderLocksLocked() {
+	now := time.Now()
+
+	for sliderID, lockedAt := range m.lockedCurrentSliders {
+		if lockedAt.Add(currentSliderLockTimeout).Before(now) {
+			delete(m.lockedCurrentSliders, sliderID)
+			m.logger.Debugw("current slider lock expired", "sliderID", sliderID, "timeout", currentSliderLockTimeout)
+		}
+	}
+}
+
+func (m *sessionMap) currentSliderIDs() []int {
+	sliderIDs := []int{}
+
+	m.deej.config.SliderMapping.iterate(func(sliderID int, targets []string) {
+		for _, target := range targets {
+			target = strings.ToLower(target)
+			if m.targetHasSpecialTransform(target) &&
+				strings.TrimPrefix(target, specialTargetTransformPrefix) == specialTargetCurrentWindow {
+				sliderIDs = append(sliderIDs, sliderID)
+				return
+			}
+		}
+	})
+
+	sort.Ints(sliderIDs)
+	return sliderIDs
+}
+
 func (m *sessionMap) applyTargetTransform(specialTargetName string) []string {
 
 	// select the transformation based on its name
@@ -326,20 +537,7 @@ func (m *sessionMap) applyTargetTransform(specialTargetName string) []string {
 
 	// get current active window
 	case specialTargetCurrentWindow:
-		currentWindowProcessNames, err := util.GetCurrentWindowProcessNames()
-
-		// silently ignore errors here, as this is on deej's "hot path" (and it could just mean the user's running linux)
-		if err != nil {
-			return nil
-		}
-
-		// we could have gotten a non-lowercase names from that, so let's ensure we return ones that are lowercase
-		for targetIdx, target := range currentWindowProcessNames {
-			currentWindowProcessNames[targetIdx] = strings.ToLower(target)
-		}
-
-		// remove dupes
-		return funk.UniqString(currentWindowProcessNames)
+		return m.resolveCurrentWindowTarget(-1, false)
 
 	// get currently unmapped sessions
 	case specialTargetAllUnmapped:

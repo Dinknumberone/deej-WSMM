@@ -9,13 +9,15 @@
 slider_mapping:
   0: deej.current
   1: spotify.exe
-  2: discord.exe
+  2: vivaldi.exe
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
 
 # settings for connecting to the arduino board
 com_port: COM7
 baud_rate: 115200
+
+current_blacklist: [explorer.exe]
 
 # adjust the amount of signal noise reduction depending on your hardware quality
 # supported values are "low" (excellent hardware), "default" (regular hardware) or "high" (bad, noisy hardware)

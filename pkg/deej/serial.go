@@ -163,8 +163,9 @@ func (sio *SerialIO) handleCommand(logger *zap.SugaredLogger, line string) {
 	case "F": //fader command
 		sio.handleLine(logger, line)
 	case "B": //button command
+		handleButton(sio.deej, line)
 	case "D": //destination command, sent when arrived at target after moving
-		sio.deej.sessions.unlockCurrentTargetKeys()
+		sio.deej.sessions.unlockCurrentSliders()
 	case "M": //mute command
 	default:
 		logger.Error("unknown command recieved")
