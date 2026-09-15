@@ -6,18 +6,41 @@
 # windows only - you can use a device's full name, i.e. "Speakers (Realtek High Definition Audio)", to bind it. this works for both output and input devices
 # windows only - you can use 'system' to control the "system sounds" volume
 # important: slider indexes start at 0, regardless of which analog pins you're using!
+
 slider_mapping:
   0: deej.current
   1: spotify.exe
   2: vivaldi.exe
+
+
+
+# map buttons to a key or key combination (separate keys with "+")
+# 0-3 buttons pressed from bottom to top, 4 is big switch, 5-8 buttons held from bottom to top
+# media keys: media next, media previous, media play (this is play and pause)
+button_mapping:
+#  0:
+#    - deej.audio_device_switch
+#    - Speakers (Focusrite USB Audio)
+#    - Headphones (Oculus Virtual Audio Device)
+#  1: a
+#  2: s
+  5: alt + tab
+  # example: switch default playback device between two endpoints
+  # 6:
+  #   - deej.audio_device_switch
+  #   - Speakers (Realtek High Definition Audio)
+  #   - Headphones (Realtek High Definition Audio)
+
+
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
 
 # settings for connecting to the arduino board
-com_port: COM7
+com_port: COM3
 baud_rate: 115200
 
-current_blacklist: [explorer.exe]
+#blacklists appliactions from the deej.current slider. explorer.exe prevents the alt+tab menu from affecting the slider.
+current_blacklist: [explorer.exe, discord.exe]
 
 # adjust the amount of signal noise reduction depending on your hardware quality
 # supported values are "low" (excellent hardware), "default" (regular hardware) or "high" (bad, noisy hardware)

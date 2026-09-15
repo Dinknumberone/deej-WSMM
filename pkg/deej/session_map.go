@@ -403,10 +403,11 @@ func (m *sessionMap) filterCurrentWindowTargetsForSlider(sliderID int, targets [
 		if m.targetMappedToOtherSlider(sliderID, target) {
 			continue
 		}
-
+		/*
 		if !m.targetHasAudioSession(target) {
 			continue
 		}
+		*/
 
 		filteredTargets = append(filteredTargets, target)
 	}

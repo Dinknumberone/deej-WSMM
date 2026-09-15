@@ -15,6 +15,16 @@ slider_mapping:
     - rocketleague.exe
   4: discord.exe
 
+# map buttons to key presses or combos (use "+" between keys)
+button_mapping:
+  0: space
+  1: ctrl + h
+  # example: switch default playback device between two endpoints
+  # 2:
+  #   - deej.audio_device_switch
+  #   - Speakers (Realtek High Definition Audio)
+  #   - Headphones (Realtek High Definition Audio)
+
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
 

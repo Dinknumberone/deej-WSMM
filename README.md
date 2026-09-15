@@ -15,18 +15,21 @@ The current/last active application is also sent to the Microcontroller, intende
 
 ## Buttons and Switches
 
-The functionality off the Serial line is rewritten to allow for different commands to be sent of the serial line, instead of always being a list. this allows individual buttons presses to be sent. Buttons outputs can be set in the config, with the following options:
+The functionality of the Serial line is rewritten to allow for different commands to be sent over the serial line, instead of always being a list. This allows individual button presses to be sent. Button outputs can be set in the config, with the following options:
 
-##### basic
-(not implemented yet, but planned)
-1. functions keys, f1-24
-2. simple macros: ctrl+key, shift+key
-3. media keys
+#### Basic (implemented)
+1. Single keys (e.g. `space`, `f13`, `media play`)
+2. Key combos (e.g. `ctrl + h`, `shift + f5`)
 
-##### Special
+#### Special (implemented)
+1. Default playback device switching:
+   - Momentary button: send only the index (toggles between the two devices)
+   - Switch/toggle: send `index,state` where state `0` selects the first device and `1` selects the second
+   - Config format:
+     - `deej.audio_device_switch`, then 2 lines with device friendly names
 
-(not implemented yet)
-1. Audio device switching, intended for a switch instead of button, 2 audio devices can be defined and the switch/button will swap between them on states
+#### Special (not implemented yet)
+1. (reserved)
 2. Webhook, a webhook can be defined, and it will be called on press
 
 

@@ -1,7 +1,7 @@
 XCommand system to recieve discinct information from MCU
 X  - pots: recieve current fader values
 X  - destination: recieved when mFader reaches target position (to prevent changing audio of program when switching applications while fader is still moving)
-  - buttons: recieve button value for specified button
+X  - buttons: recieve button value for specified button
   - mute: reviece mute value and what channel it is on
 
 config option to set what buttons activate what key or application
@@ -11,6 +11,22 @@ config option to set what buttons activate what key or application
   - 
 
 
+mcu:
+ - fix oscilation
+ - auto switch to main mode when connecting with deej
+ - auto find device port, have identifier from mcu as deej device
+ - auto reconnect if disconnected or not found instead of just closing
+ - change mcu settings from deej
+
+
+
+
 active app/mFader:
 
 X  - lock volume changes when application switches until reached destination command is recieved
+
+
+fixes:
+
+newly opened applications have their session missed, require when switching to an unkown session or when a new application is opened if possible
+add period check  to confirm current application hasn't changed
