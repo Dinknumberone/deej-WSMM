@@ -6,6 +6,9 @@ venv/
 .vscode
 *.lnk
 *.exe
+pkg/deej/tools/dfu-util/dfu-util-0.11-win64/*
+!pkg/deej/tools/dfu-util/dfu-util-0.11-win64/dfu-util-static.exe
+!pkg/deej/tools/dfu-util/README.md
 deej-dev
 deej-release
 releases/

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -27,8 +29,15 @@ type Deej struct {
 	sessions *sessionMap
 
 	stopChannel chan bool
+	doneChannel chan struct{}
 	version     string
 	verbose     bool
+
+	// devBuild is true for development builds, gating dev-only features
+	devBuild bool
+
+	firmwareFlashMu     sync.Mutex
+	firmwareFlashActive bool
 }
 
 // NewDeej creates a Deej instance
@@ -52,6 +61,7 @@ func NewDeej(logger *zap.SugaredLogger, verbose bool) (*Deej, error) {
 		notifier:    notifier,
 		config:      config,
 		stopChannel: make(chan bool),
+		doneChannel: make(chan struct{}),
 		verbose:     verbose,
 	}
 
@@ -117,6 +127,12 @@ func (d *Deej) Initialize() error {
 	return nil
 }
 
+// SetDevBuild marks this instance as a development build, enabling dev-only
+// features such as the live status window. Must be called before Initialize.
+func (d *Deej) SetDevBuild(isDev bool) {
+	d.devBuild = isDev
+}
+
 // SetVersion causes deej to add a version string to its tray menu if called before Initialize
 func (d *Deej) SetVersion(version string) {
 	d.version = version
@@ -142,32 +158,73 @@ func (d *Deej) run() {
 
 	// watch the config file for changes
 	go d.config.WatchConfigFileChanges()
-	d.startStatusFileUpdater()
 
-	// connect to the arduino for the first time
+	// the live status window is a dev-only debugging affordance
+	if d.devBuild {
+		d.startStatusFileUpdater()
+	}
+
+	// connect to the arduino, and keep reconnecting whenever we lose it
 	go func() {
-		if err := d.serial.Start(); err != nil {
-			d.logger.Warnw("Failed to start first-time serial connection", "error", err)
+		disconnectChannel := d.serial.SubscribeToDisconnectEvents()
 
-			// If the port is busy, that's because something else is connected - notify and quit
+		// only notify about a broken setup once, instead of on every retry
+		var notifiedMissingPort, notifiedBusyPort bool
+
+		for {
+			if d.serial.IsConnected() {
+				// we're connected - wait until the serial layer tells us we lost it
+				select {
+				case <-disconnectChannel:
+					d.logger.Warn("Serial connection lost, will attempt to reconnect")
+					continue
+				case <-d.doneChannel:
+					return
+				}
+			}
+
+			retryInterval := d.serial.connRetryInterval
+			if retryInterval <= 0 {
+				retryInterval = time.Second
+			}
+
+			err := d.serial.Start()
+			if err == nil {
+				d.logger.Info("Serial connection established")
+				notifiedMissingPort, notifiedBusyPort = false, false
+				continue
+			}
+
+			d.logger.Warnw("Failed to connect to serial port", "error", err)
+
+			// If the port is busy, that's because something else is connected
 			if errors.Is(err, os.ErrPermission) {
-				d.logger.Warnw("Serial port seems busy, notifying user and closing",
-					"comPort", d.config.ConnectionInfo.COMPort)
+				if !notifiedBusyPort {
+					d.logger.Warnw("Serial port seems busy, notifying user",
+						"comPort", d.config.ConnectionInfo.COMPort)
 
-				d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
-					"This serial port is busy, make sure to close any serial monitor or other deej instance.")
+					d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
+						"This serial port is busy, make sure to close any serial monitor or other deej instance.")
 
-				d.signalStop()
-
+					notifiedBusyPort = true
+				}
+			} else if errors.Is(err, os.ErrNotExist) && !notifiedMissingPort {
 				// also notify if the COM port they gave isn't found, maybe their config is wrong
-			} else if errors.Is(err, os.ErrNotExist) {
-				d.logger.Warnw("Provided COM port seems wrong, notifying user and closing",
+				d.logger.Warnw("Provided COM port seems wrong, notifying user",
 					"comPort", d.config.ConnectionInfo.COMPort)
 
 				d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
 					"This serial port doesn't exist, check your configuration and make sure it's set correctly.")
 
-				d.signalStop()
+				notifiedMissingPort = true
+			}
+
+			d.logger.Warnw("Retrying serial connection in", "seconds", retryInterval)
+
+			select {
+			case <-time.After(retryInterval):
+			case <-d.doneChannel:
+				return
 			}
 		}
 	}()
@@ -192,6 +249,9 @@ func (d *Deej) signalStop() {
 
 func (d *Deej) stop() error {
 	d.logger.Info("Stopping")
+
+	// let background goroutines (e.g. the serial reconnect loop) know we're going down
+	close(d.doneChannel)
 
 	d.config.StopWatchingConfigFile()
 	d.serial.Stop()

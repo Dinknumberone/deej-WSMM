@@ -19,6 +19,13 @@ const (
 	logFilename  = "deej-latest-run.log"
 )
 
+// IsDevBuild reports whether the given build type is a development build.
+// Development-only features (e.g. the live status window) are only enabled
+// for dev builds, and disabled for release builds.
+func IsDevBuild(buildType string) bool {
+	return buildType == buildTypeDev || buildType == buildTypeNone
+}
+
 // NewLogger provides a logger instance for the whole program
 func NewLogger(buildType string) (*zap.SugaredLogger, error) {
 	var loggerConfig zap.Config

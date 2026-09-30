@@ -25,6 +25,8 @@ type CanonicalConfig struct {
 		BaudRate int
 	}
 
+	ReconnectInterval time.Duration
+
 	InvertSliders bool
 
 	NoiseReductionLevel string
@@ -58,9 +60,11 @@ const (
 	configKeyBaudRate            = "baud_rate"
 	configKeyNoiseReductionLevel = "noise_reduction"
 	configKeyCurrentBlacklist    = "current_blacklist"
+	configKeyReconnectInterval   = "reconnect_interval"
 
 	defaultCOMPort  = "COM4"
 	defaultBaudRate = 9600
+	defaultReconnectInterval = 10
 )
 
 // has to be defined as a non-constant because we're using path.Join
@@ -96,6 +100,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyCOMPort, defaultCOMPort)
 	userConfig.SetDefault(configKeyBaudRate, defaultBaudRate)
 	userConfig.SetDefault(configKeyCurrentBlacklist, []string{})
+	userConfig.SetDefault(configKeyReconnectInterval, defaultReconnectInterval)
 
 	internalConfig := viper.New()
 	internalConfig.SetConfigName(internalConfigName)
@@ -238,6 +243,8 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 
 	// get the rest of the config fields - viper saves us a lot of effort here
 	cc.ConnectionInfo.COMPort = cc.userConfig.GetString(configKeyCOMPort)
+
+	cc.ReconnectInterval = time.Duration(cc.userConfig.GetInt(configKeyReconnectInterval)) * time.Second
 
 	cc.ConnectionInfo.BaudRate = cc.userConfig.GetInt(configKeyBaudRate)
 	if cc.ConnectionInfo.BaudRate <= 0 {

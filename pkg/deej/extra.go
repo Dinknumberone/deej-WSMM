@@ -17,9 +17,12 @@ const (
 
 func newExtraUtils(d *Deej) {
 
-	currentWindowUpdater(d)
+	go func(){
+		setCurrentWindowEventHook(d)
+	}()
 
-	computerStatisticUpdater(d)
+
+	//computerStatisticUpdater(d)
 }
 
 func handleButtonLine(d *Deej, line string) {
@@ -219,7 +222,115 @@ func handleSpecialButtonCommand(d *Deej, command buttonCommand, stateProvided bo
 	}
 }
 
-func currentWindowUpdater(d *Deej) {
+func setCurrentWindowEventHook(d *Deej) {
+	
+		callback := win.WINEVENTPROC(func(
+			hWinEventHook win.HWINEVENTHOOK,
+			event uint32,
+			hwnd win.HWND,
+			idObject int32,
+			idChild int32,
+			idEventThread uint32,
+			dwmsEventTime uint32,
+		) uintptr {
+			onCurrentWindowChange(hwnd, d)
+			return 0
+		})
+
+		hook, _ := win.SetWinEventHook(
+			win.EVENT_SYSTEM_FOREGROUND,
+			win.EVENT_SYSTEM_FOREGROUND,
+			0,
+			callback,
+			0,
+			0,
+			win.WINEVENT_OUTOFCONTEXT,
+		)
+
+		defer win.UnhookWinEvent(hook)
+		
+		var msg win.MSG
+		for win.GetMessage(&msg, 0, 0, 0) != 0 {
+			win.TranslateMessage(&msg)
+			win.DispatchMessage(&msg)
+		}
+
+		_ = unsafe.Pointer(nil)
+}
+
+
+func onCurrentWindowChange(hwnd win.HWND, d *Deej) {
+	time.Sleep(30 * time.Millisecond) 
+
+	if (d.sessions.currentWindow == hwnd) {
+		return
+	}
+
+	currentSliderIDs := d.sessions.currentSliderIDs()
+	
+	if len(currentSliderIDs) == 0 {
+		d.logger.Debug("no current slider found, skipping current window update")
+		return
+	}
+	
+	currentSliderID := currentSliderIDs[0]
+	registeredCurrentTarget := d.sessions.currentTargetStatus()
+	
+	resolvedTargets := d.sessions.resolveCurrentWindowTarget(currentSliderID, true)
+	if len(resolvedTargets) == 0 {
+		d.logger.Debug("no resolved target found, skipping current window update")
+		return
+	}
+
+	
+	currentWindowProcessName := resolvedTargets[0]
+
+	d.logger.Debug("before resolved target check | current: ", currentWindowProcessName, " | registered: ", registeredCurrentTarget)
+
+	
+
+	if currentWindowProcessName == registeredCurrentTarget{
+		return
+	}
+
+	d.sessions.logger.Debug("Current window changed, updating slider target: ", string(currentWindowProcessName))
+
+	if d.sessions.lastSessionRefresh.Add(maxTimeBetweenSessionRefreshes).Before(time.Now()) {
+		d.sessions.logger.Debug("Stale session map detected on slider move, refreshing")
+		d.sessions.refreshSessions(true)
+	}
+
+	sessions, ok := d.sessions.get(currentWindowProcessName)
+
+	if !ok || len(sessions) == 0 {
+		d.sessions.refreshSessions(false)
+		sessions, ok = d.sessions.get(currentWindowProcessName)
+	}
+	if !ok || len(sessions) == 0 {
+		return
+	}
+
+	d.sessions.lockCurrentSlider(currentSliderID)
+
+	currentVol := sessions[0].GetVolume()
+	currentVol *= 255
+	intVol := int(currentVol)
+
+	//transform scale to proper for the microcontroller
+
+	d.logger.Debug(currentWindowProcessName, currentVol)
+
+	d.sessions.currentWindow = hwnd
+
+	message := "goto " + strconv.Itoa(intVol)
+
+	d.logger.Debug("sending message: ", string(message))
+
+	d.serial.SendCommand(message)
+
+}
+
+func oldcurrentWindowUpdater(d *Deej) {
 
 	lastCurrentSliderID := -1
 	var lastwindow win.HWND
@@ -284,10 +395,10 @@ func currentWindowUpdater(d *Deej) {
 
 			d.logger.Debug(currentWindowProcessName, currentVol)
 
-			message := []byte("goto " + strconv.Itoa(intVol) + "\n")
+			message := "goto " + strconv.Itoa(intVol)
 
-			d.logger.Debug("sending message: ", string(message))
-			if _, err := d.serial.conn.Write(message); err != nil {
+			d.logger.Debug("sending message: ", message)
+			if err := d.serial.SendCommand(message); err != nil {
 				d.logger.Warnw("failed to write goto command", "error", err)
 			}
 

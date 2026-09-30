@@ -27,7 +27,15 @@ func (d *Deej) initializeTray(onDone func()) {
 
 		refreshSessions := systray.AddMenuItem("Re-scan audio sessions", "Manually refresh audio sessions if something's stuck")
 		refreshSessions.SetIcon(icon.RefreshSessions)
-		openStatusWindow := systray.AddMenuItem("Open live status window", "Open a persistent auto-refreshing status console")
+		flashFirmware := systray.AddMenuItem("Flash MCU firmware…", "Select and flash an ESP32-S3 DFU image through the USB OTG port")
+
+		// a nil channel blocks forever in a select, which is what we want in
+		// release builds where the menu item doesn't exist
+		var openStatusWindowCh <-chan struct{}
+		if d.devBuild {
+			openStatusWindow := systray.AddMenuItem("Open live status window", "Open a persistent auto-refreshing status console")
+			openStatusWindowCh = openStatusWindow.ClickedCh
+		}
 
 		systray.AddSeparator()
 		currentTargetInfo := systray.AddMenuItem("Current app: (none)", "Resolved target for deej.current")
@@ -76,8 +84,13 @@ func (d *Deej) initializeTray(onDone func()) {
 					// right-click -> select-this-option sequence at a rate that's meaningful to performance
 					d.sessions.refreshSessions(true)
 
+				// firmware update
+				case <-flashFirmware.ClickedCh:
+					logger.Info("Flash MCU firmware menu item clicked")
+					d.startFirmwareFlash()
+
 				// open live status console
-				case <-openStatusWindow.ClickedCh:
+				case <-openStatusWindowCh:
 					logger.Info("Open status window clicked")
 
 					statusFilePath, err := filepath.Abs(filepath.Join(logDirectory, statusFileName))

@@ -12,11 +12,12 @@ config option to set what buttons activate what key or application
 
 
 mcu:
- - fix oscilation
+X - fix oscilation
  - auto switch to main mode when connecting with deej
  - auto find device port, have identifier from mcu as deej device
  - auto reconnect if disconnected or not found instead of just closing
  - change mcu settings from deej
+ - simple GUI for settings and config
 
 
 
@@ -29,4 +30,5 @@ X  - lock volume changes when application switches until reached destination com
 fixes:
 
 newly opened applications have their session missed, require when switching to an unkown session or when a new application is opened if possible
+X change logic for finding active session to use event hooks instead of checking on a timer (lxn/win library (SetWinEventHook()))
 add period check  to confirm current application hasn't changed

@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
+	"github.com/mitchellh/go-ps"
 	"go.uber.org/zap"
 )
 
@@ -152,4 +155,54 @@ func SignificantlyDifferent(old float32, new float32, noiseReductionLevel string
 // a helper to make sure volume snaps correctly to 0 and 100, where appropriate
 func almostEquals(a float32, b float32) bool {
 	return math.Abs(float64(a-b)) < 0.000001
+}
+
+// AlreadyRunningInstancePID returns the PID of another running instance of this
+// same executable, or 0 if this is the only one running.
+// deej can only have a single instance running at a time, since two instances
+// would fight over the serial port, the tray icon and the config file.
+// this is a best-effort check based on the executable name and path, which is
+// good enough to catch the common case of accidentally double-clicking deej.
+func AlreadyRunningInstancePID() (int, error) {
+	ourPath, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("get own executable path: %w", err)
+	}
+
+	ourPath, err = filepath.Abs(ourPath)
+	if err != nil {
+		return 0, fmt.Errorf("resolve own executable path: %w", err)
+	}
+
+	ourPID := os.Getpid()
+
+	processes, err := ps.Processes()
+	if err != nil {
+		return 0, fmt.Errorf("enumerate processes: %w", err)
+	}
+
+	for _, proc := range processes {
+		if proc.Pid() == ourPID {
+			continue
+		}
+
+		executable := proc.Executable()
+		if executable == "" {
+			// can't read this one (permissions, already exited, etc) - just skip it
+			continue
+		}
+
+		otherPath, err := filepath.Abs(executable)
+		if err != nil {
+			continue
+		}
+
+		// compare the full path, so a dev build and a release build of deej
+		// (or an unrelated program with a similar name) don't trip this check
+		if strings.EqualFold(otherPath, ourPath) {
+			return proc.Pid(), nil
+		}
+	}
+
+	return 0, nil
 }

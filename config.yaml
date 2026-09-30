@@ -36,7 +36,7 @@ button_mapping:
 invert_sliders: false
 
 # settings for connecting to the arduino board
-com_port: COM3
+com_port: COM11
 baud_rate: 115200
 
 #blacklists appliactions from the deej.current slider. explorer.exe prevents the alt+tab menu from affecting the slider.
@@ -45,3 +45,5 @@ current_blacklist: [explorer.exe, discord.exe]
 # adjust the amount of signal noise reduction depending on your hardware quality
 # supported values are "low" (excellent hardware), "default" (regular hardware) or "high" (bad, noisy hardware)
 noise_reduction: default
+# how many sceonds to wait before trying to reconnect if the device gets disconnected.
+reconnect_interval: 4

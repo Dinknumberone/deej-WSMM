@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lxn/win"
 	"github.com/omriharel/deej/pkg/deej/util"
 	"github.com/thoas/go-funk"
 	"go.uber.org/zap"
@@ -27,6 +28,8 @@ type sessionMap struct {
 	lockedCurrentSliders map[int]time.Time
 	lastCurrentTargets []string
 	currentTargetKey   string
+
+	currentWindow win.HWND
 }
 
 const (
