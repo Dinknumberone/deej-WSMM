@@ -12,14 +12,16 @@ import (
 
 const (
 	currentWindowUpdaterQuickCheckInterval = 200 * time.Millisecond
-	currentWindowUpdaterFullCheckInterval  = 10000 * time.Second
+	currentWindowUpdaterFullCheckInterval  = 5 * time.Second
+
+
 )
 
 func newExtraUtils(d *Deej) {
 
-	go func(){
-		setCurrentWindowEventHook(d)
-	}()
+	go setCurrentWindowEventHook(d)
+
+	go periodicCurrentWindowCheck(d)
 
 
 	//computerStatisticUpdater(d)
@@ -258,6 +260,16 @@ func setCurrentWindowEventHook(d *Deej) {
 		_ = unsafe.Pointer(nil)
 }
 
+func periodicCurrentWindowCheck(d *Deej) {
+	for {
+		time.Sleep(currentWindowUpdaterFullCheckInterval)
+		d.logger.Debug("Performing periodic current window check")
+		currentWindow := win.GetForegroundWindow()
+		onCurrentWindowChange(currentWindow, d)
+
+	}
+}
+
 
 func onCurrentWindowChange(hwnd win.HWND, d *Deej) {
 	time.Sleep(30 * time.Millisecond) 
@@ -266,27 +278,16 @@ func onCurrentWindowChange(hwnd win.HWND, d *Deej) {
 		return
 	}
 
-	currentSliderIDs := d.sessions.currentSliderIDs()
-	
-	if len(currentSliderIDs) == 0 {
-		d.logger.Debug("no current slider found, skipping current window update")
-		return
-	}
-	
-	currentSliderID := currentSliderIDs[0]
+	currentSliderID := d.sessions.currentSliderIDs()[0]
 	registeredCurrentTarget := d.sessions.currentTargetStatus()
-	
 	resolvedTargets := d.sessions.resolveCurrentWindowTarget(currentSliderID, true)
+
 	if len(resolvedTargets) == 0 {
 		d.logger.Debug("no resolved target found, skipping current window update")
 		return
 	}
 
-	
 	currentWindowProcessName := resolvedTargets[0]
-
-	d.logger.Debug("before resolved target check | current: ", currentWindowProcessName, " | registered: ", registeredCurrentTarget)
-
 	
 
 	if currentWindowProcessName == registeredCurrentTarget{
@@ -299,14 +300,18 @@ func onCurrentWindowChange(hwnd win.HWND, d *Deej) {
 		d.sessions.logger.Debug("Stale session map detected on slider move, refreshing")
 		d.sessions.refreshSessions(true)
 	}
-
+ 
 	sessions, ok := d.sessions.get(currentWindowProcessName)
 
+	//wait for session refresh to complete, or timeout after 3 attempts
 	if !ok || len(sessions) == 0 {
-		d.sessions.refreshSessions(false)
+		for attempt := 0; (!ok || len(sessions) == 0) && attempt < 3; attempt++ {
+		if(ok) {break}
+		//d.sessions.refreshSessions(true)
+
+		time.Sleep(200 * time.Millisecond)
 		sessions, ok = d.sessions.get(currentWindowProcessName)
-	}
-	if !ok || len(sessions) == 0 {
+		}
 		return
 	}
 

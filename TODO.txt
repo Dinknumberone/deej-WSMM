@@ -30,9 +30,9 @@ X  - lock volume changes when application switches until reached destination com
 
 fixes:
 
-newly opened applications have their session missed, require when switching to an unkown session or when a new application is opened if possible
+X newly opened applications have their session missed, require when switching to an unkown session or when a new application is opened if possible
 X change logic for finding active session to use event hooks instead of checking on a timer (lxn/win library (SetWinEventHook()))
-add period check  to confirm current application hasn't changed
+X add period check  to confirm current application hasn't changed
 
 Layers:
     layer configs per fader to set different targets
