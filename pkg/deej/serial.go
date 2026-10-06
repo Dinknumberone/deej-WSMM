@@ -29,6 +29,29 @@ const (
 	// watchdogInterval is how often we check whether the connection went silent
 	watchdogInterval = 500 * time.Millisecond
 
+	// connectGracePeriod is how long after a fresh connection we wait before
+	// the silence watchdog is allowed to fire. USB MCUs (Arduino auto-reset,
+	// ESP32-S3 CDC re-enumeration) often need a few seconds after the port is
+	// opened before they start streaming lines. Without this grace period the
+	// reconnect loop opens the port (resetting the MCU), kills the connection
+	// after 2s of silence, reopens it (resetting the MCU again), and never
+	// lets the device stabilize - an endless find-device loop that only a
+	// physical re-plug breaks.
+	connectGracePeriod = 5 * time.Second
+
+	// wakeGapThreshold is how far apart two watchdog ticks may be before we
+	// assume the PC just woke from sleep/hibernation. time.Sleep-based tickers
+	// don't fire while suspended, so a large gap is a reliable, message-loop
+	// free wake detector on every platform.
+	wakeGapThreshold = 5 * time.Second
+
+	// wakeSettleDelay is how long we pause after a sleep/wake cycle before
+	// letting the reconnect loop open the port again, giving Windows time to
+	// re-enumerate the USB CDC device and release the stale handle. Opening
+	// the port too eagerly after resume yields "access denied" / missing-port
+	// errors in a tight loop.
+	wakeSettleDelay = 3 * time.Second
+
 	// stopTimeout is how long Stop() waits for the port to be released
 	stopTimeout = 2 * time.Second
 )
@@ -57,7 +80,7 @@ type SerialIO struct {
 	conn        io.ReadWriteCloser
 	connRetryInterval time.Duration
 
-	// connMu guards connected, conn, lastReadTime and closedChannel, which are
+	// connMu guards connected, conn, lastReadTime, connectTime and closedChannel, which are
 	// written by the read loop goroutine and read by other goroutines (the
 	// reconnect loop in deej.go, Stop(), SendCommand() and the extra.go writers)
 	connMu sync.RWMutex
@@ -67,6 +90,17 @@ type SerialIO struct {
 	closedChannel chan struct{}
 
 	lastReadTime time.Time
+
+	// connectTime is when the current connection was established. The silence
+	// watchdog ignores quiet periods younger than connectGracePeriod so the
+	// MCU has time to boot/stream after the port open (which itself resets
+	// most Arduino-style boards).
+	connectTime time.Time
+
+	// wakeMu guards wakeSettleUntil, which marks how long after a detected
+	// sleep/wake cycle the reconnect loop should hold off opening the port
+	wakeMu           sync.Mutex
+	wakeSettleUntil  time.Time
 
 	lastKnownNumSliders        int
 	currentSliderPercentValues []float32
@@ -105,6 +139,10 @@ func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 
 	// respond to config changes
 	sio.setupOnConfigReload()
+
+	// wake detection while idle (no active watchdog), so reconnects after
+	// sleep back off instead of hammering a half-enumerated USB port
+	go sio.watchForWakeWhileIdle()
 
 	return sio, nil
 }
@@ -181,6 +219,7 @@ func (sio *SerialIO) Start() error {
 	sio.conn = conn
 	sio.connected = true
 	sio.lastReadTime = time.Now()
+	sio.connectTime = time.Now()
 	closedChannel := make(chan struct{})
 	sio.closedChannel = closedChannel
 	sio.connMu.Unlock()
@@ -210,9 +249,15 @@ func (sio *SerialIO) Start() error {
 
 		// watchdog: on windows, unplugging the device makes the blocking read hang
 		// forever instead of erroring out, so we track time since the last line
-		// ourselves and treat prolonged silence as a disconnect
+		// ourselves and treat prolonged silence as a disconnect.
+		// the tick-gap check doubles as a sleep/wake detector: ticks don't fire
+		// while the PC is suspended, so a large gap means we just resumed with
+		// a stale USB handle that must be torn down and re-opened after a
+		// short settle delay (see WakeDetected / WaitForWakeSettle).
 		watchdog := time.NewTicker(watchdogInterval)
 		defer watchdog.Stop()
+
+		lastTick := time.Now()
 
 		for {
 			select {
@@ -230,10 +275,28 @@ func (sio *SerialIO) Start() error {
 				sio.connMu.Unlock()
 
 				sio.handleCommand(namedLogger, res.line)
-			case <-watchdog.C:
+			case now := <-watchdog.C:
+				if now.Sub(lastTick) > wakeGapThreshold {
+					namedLogger.Infow("Detected system wake from sleep, recycling serial connection",
+						"gap", now.Sub(lastTick).String())
+					sio.WakeDetected()
+					sio.handleDisconnect(namedLogger, errors.New("serial: system woke from sleep, recycling connection"))
+					return
+				}
+				lastTick = now
+
 				sio.connMu.RLock()
 				last := sio.lastReadTime
+				sinceConnect := now.Sub(sio.connectTime)
 				sio.connMu.RUnlock()
+
+				// give a freshly opened port time to start streaming before
+				// treating silence as a dead device. opening the port resets
+				// most MCUs, and killing the connection during that boot loop
+				// is exactly what caused the endless post-sleep retry loop.
+				if sinceConnect < connectGracePeriod {
+					continue
+				}
 
 				if time.Since(last) > silenceTimeout {
 					namedLogger.Warnw("Serial connection went silent, assuming device was disconnected",
@@ -383,6 +446,60 @@ func (sio *SerialIO) setupOnConfigReload() {
 			}
 		}
 	}()
+}
+
+// WakeDetected marks the start of a post-sleep settle window during which the
+// reconnect loop should not open the serial port, giving Windows time to
+// re-enumerate the USB CDC device. It is called by the read-loop watchdog when
+// it observes a tick gap, and by the background wake watcher when idle.
+func (sio *SerialIO) WakeDetected() {
+	sio.wakeMu.Lock()
+	sio.wakeSettleUntil = time.Now().Add(wakeSettleDelay)
+	sio.wakeMu.Unlock()
+}
+
+// WaitForWakeSettle blocks until any post-sleep settle window has elapsed, or
+// done is closed. It returns false if done was closed (caller should exit).
+func (sio *SerialIO) WaitForWakeSettle(done <-chan struct{}) bool {
+	for {
+		sio.wakeMu.Lock()
+		until := sio.wakeSettleUntil
+		sio.wakeMu.Unlock()
+
+		wait := time.Until(until)
+		if wait <= 0 {
+			return true
+		}
+
+		sio.logger.Infow("Waiting for USB device to settle after system wake",
+			"wait", wait.String())
+
+		select {
+		case <-time.After(wait):
+		case <-done:
+			return false
+		}
+	}
+}
+
+// watchForWakeWhileIdle detects sleep/wake cycles while no connection (and
+// therefore no watchdog) is active, so the reconnect loop still backs off
+// after resume instead of hammering a half-enumerated port.
+func (sio *SerialIO) watchForWakeWhileIdle() {
+	ticker := time.NewTicker(watchdogInterval)
+	defer ticker.Stop()
+
+	lastTick := time.Now()
+
+	for range ticker.C {
+		now := time.Now()
+		if now.Sub(lastTick) > wakeGapThreshold {
+			sio.logger.Infow("Detected system wake from sleep while disconnected, delaying reconnect",
+				"gap", now.Sub(lastTick).String())
+			sio.WakeDetected()
+		}
+		lastTick = now
+	}
 }
 
 // handleDisconnect tears down the active connection and notifies any subscriber

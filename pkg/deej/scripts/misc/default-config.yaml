@@ -1,3 +1,6 @@
+#port to connect to WSMM mixer
+com_port: COM11
+
 # process names are case-insensitive
 # you can use 'master' to indicate the master channel, or a list of process names to create a group
 # you can use 'mic' to control your mic input level (uses the default recording device)
@@ -6,32 +9,44 @@
 # windows only - you can use a device's full name, i.e. "Speakers (Realtek High Definition Audio)", to bind it. this works for both output and input devices
 # windows only - you can use 'system' to control the "system sounds" volume
 # important: slider indexes start at 0, regardless of which analog pins you're using!
-slider_mapping:
-  0: master
-  1: chrome.exe
-  2: spotify.exe
-  3:
-    - pathofexile_x64.exe
-    - rocketleague.exe
-  4: discord.exe
 
-# map buttons to key presses or combos (use "+" between keys)
+slider_mapping:
+  0: deej.current
+  1: spotify.exe
+  2: vivaldi.exe
+
+
+
+# map buttons to a key or key combination (separate keys with "+")
+# media keys: media next, media previous, media play (this is play and pause)
+# 0 big switch, 1-4 buttons pressed from bottom to top, 5-8 buttons held from bottom to top
 button_mapping:
-  0: space
-  1: ctrl + h
-  # example: switch default playback device between two endpoints
-  # 2:
-  #   - deej.audio_device_switch
-  #   - Speakers (Realtek High Definition Audio)
-  #   - Headphones (Realtek High Definition Audio)
+#  0: 
+  1: media play
+#  2:
+#  3:
+#  4:
+#  5: alt + tab
+#  6:
+#  7:
+#  8:
+
+
+#blacklists appliactions from the deej.current slider. explorer.exe prevents the alt+tab menu from affecting the slider.
+current_blacklist: [explorer.exe]
+
+
 
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
 
 # settings for connecting to the arduino board
-com_port: COM4
-baud_rate: 9600
+
+#leave unchanged
+baud_rate: 115200
 
 # adjust the amount of signal noise reduction depending on your hardware quality
 # supported values are "low" (excellent hardware), "default" (regular hardware) or "high" (bad, noisy hardware)
 noise_reduction: default
+# how many sceonds to wait before trying to reconnect if the device gets disconnected.
+reconnect_interval: 4

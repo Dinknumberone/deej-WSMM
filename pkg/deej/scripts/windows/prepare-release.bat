@@ -28,6 +28,7 @@ MOVE /Y "%DEEJ_ROOT%\deej-release.exe" "%DEEJ_ROOT%\releases\%1\deej.exe" >NUL 2
 MOVE /Y "%DEEJ_ROOT%\deej-dev.exe" "%DEEJ_ROOT%\releases\%1\deej-debug.exe" >NUL 2>&1
 COPY /Y "%DEEJ_ROOT%\pkg\deej\scripts\misc\default-config.yaml" "%DEEJ_ROOT%\releases\%1\config.yaml" >NUL 2>&1
 COPY /Y "%DEEJ_ROOT%\pkg\deej\scripts\misc\release-notes.txt" "%DEEJ_ROOT%\releases\%1\notes.txt" >NUL 2>&1
+COPY /Y "%DEEJ_ROOT%\esptool.exe" "%DEEJ_ROOT%\releases\%1\esptool.exe" >NUL 2>&1
 
 ECHO.
 ECHO Release binaries created in %DEEJ_ROOT%\releases\%1

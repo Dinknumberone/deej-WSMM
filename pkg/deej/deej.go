@@ -18,6 +18,11 @@ const (
 
 	// when this is set to anything, deej won't use a tray icon
 	envNoTray = "DEEJ_NO_TRAY_ICON"
+
+	// maxRetryInterval caps the progressive back-off of the serial reconnect
+	// loop so a missing/stale port after sleep doesn't spin hot, but also
+	// doesn't wait forever between attempts
+	maxRetryInterval = 60 * time.Second
 )
 
 // Deej is the main entity managing access to all sub-components
@@ -171,6 +176,9 @@ func (d *Deej) run() {
 		// only notify about a broken setup once, instead of on every retry
 		var notifiedMissingPort, notifiedBusyPort bool
 
+		// consecutiveFailures drives progressive back-off above; reset on success
+		var consecutiveFailures int
+
 		for {
 			if d.serial.IsConnected() {
 				// we're connected - wait until the serial layer tells us we lost it
@@ -183,17 +191,36 @@ func (d *Deej) run() {
 				}
 			}
 
+			// after a sleep/wake cycle the USB CDC device needs a moment to
+			// re-enumerate; opening the port too eagerly just yields stale
+			// handles / access-denied errors in a tight loop
+			if !d.serial.WaitForWakeSettle(d.doneChannel) {
+				return
+			}
+
 			retryInterval := d.serial.connRetryInterval
 			if retryInterval <= 0 {
 				retryInterval = time.Second
+			}
+
+			// back off progressively while the device stays unreachable so a
+			// missing/stale port after resume doesn't spin hot; resets on success
+			if consecutiveFailures > 3 {
+				retryInterval = retryInterval * time.Duration(consecutiveFailures-2)
+				if retryInterval > maxRetryInterval {
+					retryInterval = maxRetryInterval
+				}
 			}
 
 			err := d.serial.Start()
 			if err == nil {
 				d.logger.Info("Serial connection established")
 				notifiedMissingPort, notifiedBusyPort = false, false
+				consecutiveFailures = 0
 				continue
 			}
+
+			consecutiveFailures++
 
 			d.logger.Warnw("Failed to connect to serial port", "error", err)
 

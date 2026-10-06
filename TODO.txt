@@ -9,13 +9,14 @@ config option to set what buttons activate what key or application
   - switch audio output (takes 2 options for audio devices)
   - hebwook call
   - 
-
+  special fader:
+  - web/put output
 
 mcu:
 X - fix oscilation
  - auto switch to main mode when connecting with deej
  - auto find device port, have identifier from mcu as deej device
- - auto reconnect if disconnected or not found instead of just closing
+X - auto reconnect if disconnected or not found instead of just closing
  - change mcu settings from deej
  - simple GUI for settings and config
 
@@ -32,3 +33,9 @@ fixes:
 newly opened applications have their session missed, require when switching to an unkown session or when a new application is opened if possible
 X change logic for finding active session to use event hooks instead of checking on a timer (lxn/win library (SetWinEventHook()))
 add period check  to confirm current application hasn't changed
+
+Layers:
+    layer configs per fader to set different targets
+    send goto to mfader if layer changed
+    button option to change Layers - toggle or set
+    button options per layer for different targets
